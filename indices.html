@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>5대 지수 실시간 대시보드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F6F7FA;
+    --surface:#FFFFFF;
+    --surface-2:#EEF1F6;
+    --line:#DEE2EA;
+    --text:#1B1F2A;
+    --muted:#6B7280;
+    --up:#D8262B;
+    --down:#2563EB;
+    --gold:#A6790E;
+    --up-dim: rgba(216,38,43,0.08);
+    --down-dim: rgba(37,99,235,0.08);
+    --gold-dim: rgba(166,121,14,0.10);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{background:var(--bg); color:var(--text); font-family:'Noto Sans KR', system-ui, sans-serif;}
+  body{
+    min-height:100vh;
+    background-image:
+      linear-gradient(rgba(0,0,0,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,0.035) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .mono{font-family:'JetBrains Mono', monospace;}
+  .wrap{max-width:840px; margin:0 auto; padding:0 20px 70px;}
+
+  header{padding:30px 0 22px; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+  .eyebrow{font-family:'JetBrains Mono',monospace; font-size:11.5px; letter-spacing:.12em; color:var(--gold); text-transform:uppercase; margin-bottom:10px;}
+  h1{font-size:24px; font-weight:900;}
+  .sub{color:var(--muted); font-size:13.5px; margin-top:8px;}
+  nav a{
+    font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--muted);
+    text-decoration:none; border:1px solid var(--line); border-radius:7px; padding:9px 14px;
+    background:var(--surface); transition:.15s;
+  }
+  nav a:hover{color:var(--text); border-color:var(--muted);}
+
+  .toolbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:10px;}
+  .updated{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted);}
+  .refresh-btn{
+    font-family:'Noto Sans KR',sans-serif; font-weight:700; font-size:13px; color:#fff;
+    background:var(--up); border:none; border-radius:7px; padding:9px 16px; cursor:pointer; transition:.15s;
+  }
+  .refresh-btn:hover{background:#b81f24;}
+  .refresh-btn:disabled{background:#F3D9DA; color:#C49496; cursor:not-allowed;}
+
+  .summary-card{
+    background:var(--surface); border:1px solid var(--gold); border-left:4px solid var(--gold);
+    border-radius:10px; padding:20px 22px; margin-bottom:22px;
+  }
+  .summary-card h2{
+    font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--gold); letter-spacing:.06em;
+    text-transform:uppercase; margin-bottom:10px;
+  }
+  .summary-text{font-size:14.5px; line-height:1.8; color:var(--text); white-space:pre-wrap;}
+  .summary-placeholder{font-size:13.5px; color:var(--muted); line-height:1.7;}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(230px,1fr)); gap:14px;}
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:18px 18px 16px;
+    position:relative; overflow:hidden;
+  }
+  .card.up{border-left:3px solid var(--up);}
+  .card.down{border-left:3px solid var(--down);}
+  .card-top{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;}
+  .card-group{font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--muted); letter-spacing:.05em; text-transform:uppercase;}
+  .card-label{font-size:15.5px; font-weight:900; margin-top:2px;}
+  .chg-badge{font-family:'JetBrains Mono',monospace; font-size:12.5px; font-weight:700; padding:3px 8px; border-radius:5px;}
+  .chg-badge.up{background:var(--up-dim); color:var(--up);}
+  .chg-badge.down{background:var(--down-dim); color:var(--down);}
+  .price{font-family:'JetBrains Mono',monospace; font-size:24px; font-weight:700; margin:6px 0 12px;}
+  .meta-row{display:flex; justify-content:space-between; font-size:12.5px; padding:5px 0; border-top:1px solid rgba(0,0,0,0.04);}
+  .meta-row .k{color:var(--muted);}
+  .meta-row .v{font-weight:500;}
+  .tag{font-family:'JetBrains Mono',monospace; font-size:11px; padding:2px 7px; border-radius:4px;}
+  .tag.above{background:var(--up-dim); color:var(--up);}
+  .tag.below{background:var(--down-dim); color:var(--down);}
+  .err-card{color:var(--down); font-size:13px; padding:6px 0;}
+
+  .skel{background:linear-gradient(90deg,var(--surface-2) 25%,#F8F9FB 37%,var(--surface-2) 63%); background-size:400% 100%; animation:shimmer 1.4s ease infinite; border-radius:6px;}
+  @keyframes shimmer{0%{background-position:100% 0;} 100%{background-position:0 0;}}
+
+  .disclaimer{margin-top:24px; padding:14px 16px; border-radius:8px; background:var(--surface-2); border:1px solid var(--line);
+    font-size:12px; color:var(--muted); line-height:1.7;}
+
+  @media (max-width:480px){h1{font-size:20px;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">LIVE INDEX BOARD</div>
+      <h1>5대 지수 실시간 대시보드</h1>
+      <p class="sub">다우존스 · 나스닥종합 · S&amp;P500 · 코스피 · 코스닥 — 10일 이평선 · 거래량 · AI 종합판단</p>
+    </div>
+    <nav><a href="/">← 매매 분석 채팅</a></nav>
+  </header>
+
+  <div class="toolbar">
+    <span class="updated" id="updatedAt">불러오는 중…</span>
+    <button class="refresh-btn" id="refreshBtn">새로고침</button>
+  </div>
+
+  <div class="summary-card">
+    <h2>AI 종합 판단</h2>
+    <div id="summaryBox" class="summary-placeholder">데이터를 불러온 뒤 종합 판단을 생성합니다…</div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="disclaimer">
+    데이터 출처: Yahoo Finance (지연 시세 가능). 10일 이평선·거래량 비교는 일봉 종가 기준 자동 계산이며, 투자 권유가 아닌 기술적 참고 자료입니다.
+    실제 투자 결정 전에는 추가 뉴스·공시·본인 손실 허용 범위를 함께 확인하세요.
+  </div>
+</div>
+
+<script>
+const grid = document.getElementById('grid');
+const updatedAt = document.getElementById('updatedAt');
+const summaryBox = document.getElementById('summaryBox');
+const refreshBtn = document.getElementById('refreshBtn');
+
+function skeletonCards(){
+  grid.innerHTML = Array.from({length:5}).map(() => `
+    <div class="card">
+      <div class="skel" style="height:11px;width:50px;margin-bottom:8px;"></div>
+      <div class="skel" style="height:18px;width:90px;margin-bottom:14px;"></div>
+      <div class="skel" style="height:26px;width:120px;margin-bottom:14px;"></div>
+      <div class="skel" style="height:12px;width:100%;margin-bottom:6px;"></div>
+      <div class="skel" style="height:12px;width:100%;"></div>
+    </div>
+  `).join('');
+}
+
+function fmtPrice(p, currency){
+  if(p === null || p === undefined) return '-';
+  const decimals = currency === 'KRW' ? 2 : 2;
+  return p.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+function renderCards(indices){
+  grid.innerHTML = indices.map(idx => {
+    if(idx.error){
+      return `
+        <div class="card">
+          <div class="card-top">
+            <div><div class="card-group">${idx.group}</div><div class="card-label">${idx.label}</div></div>
+          </div>
+          <div class="err-card">조회 실패: ${idx.error}</div>
+        </div>`;
+    }
+    const dir = idx.changePct >= 0 ? 'up' : 'down';
+    const sign = idx.changePct >= 0 ? '+' : '';
+    return `
+      <div class="card ${dir}">
+        <div class="card-top">
+          <div><div class="card-group">${idx.group}</div><div class="card-label">${idx.label}</div></div>
+          <span class="chg-badge ${dir}">${sign}${idx.changePct}%</span>
+        </div>
+        <div class="price">${fmtPrice(idx.price, idx.currency)}</div>
+        <div class="meta-row"><span class="k">10일선 대비</span><span class="v"><span class="tag ${idx.aboveMa10 ? 'above':'below'}">${idx.aboveMa10 ? '위':'아래'} (${idx.ma10 ?? '-'})</span></span></div>
+        <div class="meta-row"><span class="k">추세</span><span class="v">${idx.trend}</span></div>
+        <div class="meta-row"><span class="k">거래량</span><span class="v">${idx.volumeNote}</span></div>
+      </div>`;
+  }).join('');
+}
+
+async function loadIndices(){
+  refreshBtn.disabled = true;
+  refreshBtn.textContent = '불러오는 중…';
+  updatedAt.textContent = '불러오는 중…';
+  summaryBox.className = 'summary-placeholder';
+  summaryBox.textContent = '데이터를 불러온 뒤 종합 판단을 생성합니다…';
+  skeletonCards();
+
+  try{
+    const res = await fetch('/api/indices');
+    const data = await res.json().catch(() => null);
+    if(!res.ok || !data){
+      throw new Error((data && data.error && data.error.message) || ('HTTP ' + res.status));
+    }
+    renderCards(data.indices || []);
+    if(data.summary){
+      summaryBox.className = 'summary-text';
+      summaryBox.textContent = data.summary;
+    } else {
+      summaryBox.className = 'summary-placeholder';
+      summaryBox.textContent = 'AI 종합 판단을 가져오지 못했어요. 지수 데이터는 위에서 확인 가능합니다.';
+    }
+    const t = data.generatedAt ? new Date(data.generatedAt) : new Date();
+    updatedAt.textContent = '마지막 갱신 ' + t.toLocaleTimeString('ko-KR');
+  } catch(err){
+    grid.innerHTML = `<div class="card"><div class="err-card">불러오기 실패: ${err.message}</div></div>`;
+    summaryBox.className = 'summary-placeholder';
+    summaryBox.textContent = '데이터를 불러오지 못해 종합 판단을 생성할 수 없어요.';
+    updatedAt.textContent = '갱신 실패';
+  } finally {
+    refreshBtn.disabled = false;
+    refreshBtn.textContent = '새로고침';
+  }
+}
+
+refreshBtn.addEventListener('click', loadIndices);
+loadIndices();
+</script>
+</body>
+</html>
