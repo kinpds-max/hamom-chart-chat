@@ -74,6 +74,9 @@
     font-family:'JetBrains Mono',monospace; font-size:11px; padding:4px 9px; border-radius:5px;
     background:var(--down-dim); color:var(--down); white-space:nowrap;
   }
+  .status-badge.surge{background:var(--gold-dim); color:var(--gold);}
+  .status-badge.buy{background:var(--up-dim); color:var(--up);}
+  .status-badge.sell{background:var(--down-dim); color:var(--down);}
   .price-cell, .vol-cell{font-family:'JetBrains Mono',monospace; text-align:right;}
 
   .section-head{display:flex; align-items:baseline; justify-content:space-between; margin:24px 0 10px;}
@@ -195,6 +198,10 @@ function renderRows(tbody, list, priceLocale){
   tbody.innerHTML = list.map(m => {
     const dir = (m.changePct ?? 0) >= 0 ? 'up' : 'down';
     const sign = (m.changePct ?? 0) >= 0 ? '+' : '';
+    const statusText = m.status || '관찰';
+    let badgeClass = 'surge';
+    if(statusText.startsWith('매수신호')) badgeClass = 'buy';
+    else if(statusText.startsWith('매도신호')) badgeClass = 'sell';
     return `
       <tr>
         <td>
@@ -204,7 +211,7 @@ function renderRows(tbody, list, priceLocale){
         <td class="price-cell">${m.price != null ? m.price.toLocaleString(priceLocale) : '-'}</td>
         <td style="text-align:right"><span class="pct ${dir}">${sign}${m.changePct ?? '-'}%</span></td>
         <td class="vol-cell">${m.volume != null ? m.volume.toLocaleString(priceLocale) : '-'}</td>
-        <td><span class="status-badge">${m.status || '추격 금지 · 관찰'}</span></td>
+        <td><span class="status-badge ${badgeClass}">${statusText}</span></td>
       </tr>`;
   }).join('');
 }
