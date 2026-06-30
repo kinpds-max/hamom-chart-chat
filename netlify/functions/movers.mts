@@ -67,6 +67,33 @@ async function fetchMarket(sosok: string, market: string) {
   return parseRows(html, market);
 }
 
+async function fetchUSGainers() {
+  const url =
+    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=false&lang=en-US&region=US&scrIds=day_gainers&count=20";
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    },
+  });
+  if (!res.ok) throw new Error(`Yahoo 스크리너 응답 오류 (미국): ${res.status}`);
+  const data = await res.json();
+  const quotes = data?.finance?.result?.[0]?.quotes || [];
+  return quotes
+    .map((q: any) => ({
+      code: q.symbol,
+      name: q.shortName || q.longName || q.symbol,
+      market: "미국",
+      price: typeof q.regularMarketPrice === "number" ? q.regularMarketPrice : null,
+      changePct:
+        typeof q.regularMarketChangePercent === "number"
+          ? Math.round(q.regularMarketChangePercent * 100) / 100
+          : null,
+      volume: typeof q.regularMarketVolume === "number" ? q.regularMarketVolume : null,
+    }))
+    .filter((m: any) => m.price !== null && m.changePct !== null);
+}
+
 export default async (req: Request, context: Context) => {
   if (req.method !== "GET" && req.method !== "POST") {
     return new Response(JSON.stringify({ error: { message: "GET 또는 POST만 허용됩니다." } }), {
@@ -76,13 +103,17 @@ export default async (req: Request, context: Context) => {
   }
 
   try {
-    const results = await Promise.allSettled(SOURCES.map((s) => fetchMarket(s.sosok, s.market)));
+    const results = await Promise.allSettled([
+      ...SOURCES.map((s) => fetchMarket(s.sosok, s.market)),
+      fetchUSGainers(),
+    ]);
+    const labels = [...SOURCES.map((s) => s.market), "미국"];
     let movers: any[] = [];
     const errors: string[] = [];
 
     results.forEach((r, i) => {
       if (r.status === "fulfilled") movers = movers.concat(r.value);
-      else errors.push(`${SOURCES[i].market}: ${(r as PromiseRejectedResult).reason?.message || r.reason}`);
+      else errors.push(`${labels[i]}: ${(r as PromiseRejectedResult).reason?.message || r.reason}`);
     });
 
     movers.sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
