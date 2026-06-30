@@ -60,6 +60,8 @@ const SYSTEM_PROMPT = `너는 '바닥 장대양봉 매매 분석기'다. 사용�
 
 const ALLOWED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
+const GEMINI_MODEL = "gemini-2.5-flash";
+
 export default async (req: Request, context: Context) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: { message: "POST 요청만 허용됩니다." } }), {
@@ -68,10 +70,10 @@ export default async (req: Request, context: Context) => {
     });
   }
 
-  const apiKey = Netlify.env.get("ANTHROPIC_API_KEY");
+  const apiKey = Netlify.env.get("GEMINI_API_KEY");
   if (!apiKey) {
     return new Response(
-      JSON.stringify({ error: { message: "서버에 ANTHROPIC_API_KEY가 설정되어 있지 않습니다. Netlify 환경변수를 확인해주세요." } }),
+      JSON.stringify({ error: { message: "서버에 GEMINI_API_KEY가 설정되어 있지 않습니다. Netlify 환경변수를 확인해주세요." } }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -94,7 +96,8 @@ export default async (req: Request, context: Context) => {
     });
   }
 
-  // Basic shape/size validation to fail fast with a clear message.
+  // Basic shape/size validation + translate Anthropic-style messages into Gemini "contents" format.
+  const contents: any[] = [];
   for (const m of messages) {
     if (!m || (m.role !== "user" && m.role !== "assistant") || !Array.isArray(m.content)) {
       return new Response(JSON.stringify({ error: { message: "messages 형식이 올바르지 않습니다." } }), {
@@ -102,8 +105,11 @@ export default async (req: Request, context: Context) => {
         headers: { "Content-Type": "application/json" },
       });
     }
+    const parts: any[] = [];
     for (const block of m.content) {
-      if (block?.type === "image") {
+      if (block?.type === "text") {
+        parts.push({ text: block.text ?? "" });
+      } else if (block?.type === "image") {
         const mediaType = block?.source?.media_type;
         if (!ALLOWED_MEDIA_TYPES.has(mediaType)) {
           return new Response(
@@ -111,36 +117,51 @@ export default async (req: Request, context: Context) => {
             { status: 400, headers: { "Content-Type": "application/json" } }
           );
         }
+        parts.push({ inline_data: { mime_type: mediaType, data: block.source.data } });
       }
     }
+    contents.push({ role: m.role === "assistant" ? "model" : "user", parts });
   }
 
   try {
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1500,
-        system: SYSTEM_PROMPT,
-        messages,
-      }),
-    });
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents,
+          generationConfig: { maxOutputTokens: 1500 },
+        }),
+      }
+    );
 
-    const data = await anthropicRes.json();
+    const data = await geminiRes.json();
 
-    if (!anthropicRes.ok) {
-      return new Response(JSON.stringify({ error: data?.error || { message: "Anthropic API 오류" } }), {
-        status: anthropicRes.status,
+    if (!geminiRes.ok) {
+      return new Response(JSON.stringify({ error: data?.error || { message: "Gemini API 오류" } }), {
+        status: geminiRes.status,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    return new Response(JSON.stringify(data), {
+    const geminiParts = data?.candidates?.[0]?.content?.parts || [];
+    const text = geminiParts.map((p: any) => p.text || "").join("\n").trim();
+
+    if (!text) {
+      const finishReason = data?.candidates?.[0]?.finishReason;
+      return new Response(
+        JSON.stringify({ error: { message: `빈 응답을 받았습니다${finishReason ? ` (사유: ${finishReason})` : ""}.` } }),
+        { status: 502, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Re-shape into the same { content: [{type:'text', text}] } envelope the frontend already expects.
+    return new Response(JSON.stringify({ content: [{ type: "text", text }] }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
