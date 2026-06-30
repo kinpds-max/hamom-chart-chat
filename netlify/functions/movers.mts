@@ -1,7 +1,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
 
-const AI_CACHE_TTL_MS = 5 * 60 * 1000; // 5분 캐시 — 무료 API 쿼터 보호
+const AI_CACHE_TTL_MS = 20 * 60 * 1000; // 20분 캐시 — 무료 API 쿼터 보호
 
 const SOURCES = [
   { sosok: "0", market: "코스피", path: "sise_rise" },

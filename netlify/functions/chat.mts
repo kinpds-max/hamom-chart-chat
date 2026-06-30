@@ -123,14 +123,12 @@ export default async (req: Request, context: Context) => {
     contents.push({ role: m.role === "assistant" ? "model" : "user", parts });
   }
 
-  try {
-    const geminiRes = await fetch(
+  const callGemini = async () => {
+    const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents,
@@ -138,6 +136,16 @@ export default async (req: Request, context: Context) => {
         }),
       }
     );
+    return res;
+  };
+
+  try {
+    let geminiRes = await callGemini();
+    // 무료 등급 분당 한도(429)에 걸리면 잠깐 쉬었다가 최대 2번 더 시도
+    for (let attempt = 0; geminiRes.status === 429 && attempt < 2; attempt++) {
+      await new Promise((r) => setTimeout(r, 4000 + attempt * 3000));
+      geminiRes = await callGemini();
+    }
 
     const data = await geminiRes.json();
 
