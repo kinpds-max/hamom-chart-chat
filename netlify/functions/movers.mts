@@ -90,6 +90,8 @@ async function fetchUSGainers() {
           ? Math.round(q.regularMarketChangePercent * 100) / 100
           : null,
       volume: typeof q.regularMarketVolume === "number" ? q.regularMarketVolume : null,
+      marketState: q.marketState || null,
+      regularMarketTime: typeof q.regularMarketTime === "number" ? q.regularMarketTime * 1000 : null,
     }))
     .filter((m: any) => m.price !== null && m.changePct !== null);
 }
@@ -108,19 +110,33 @@ export default async (req: Request, context: Context) => {
       fetchUSGainers(),
     ]);
     const labels = [...SOURCES.map((s) => s.market), "미국"];
-    let movers: any[] = [];
+    let domestic: any[] = [];
+    let overseas: any[] = [];
     const errors: string[] = [];
 
     results.forEach((r, i) => {
-      if (r.status === "fulfilled") movers = movers.concat(r.value);
-      else errors.push(`${labels[i]}: ${(r as PromiseRejectedResult).reason?.message || r.reason}`);
+      if (r.status === "fulfilled") {
+        if (labels[i] === "미국") overseas = overseas.concat(r.value);
+        else domestic = domestic.concat(r.value);
+      } else {
+        errors.push(`${labels[i]}: ${(r as PromiseRejectedResult).reason?.message || r.reason}`);
+      }
     });
 
-    movers.sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
-    movers = movers.slice(0, 20);
+    domestic.sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
+    overseas.sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
+    domestic = domestic.slice(0, 15).map((m) => ({ ...m, status: "추격 금지 · 관찰" }));
+    overseas = overseas.slice(0, 15).map((m) => ({ ...m, status: "추격 금지 · 관찰" }));
 
-    // 모든 종목은 기본적으로 '추격 금지' 상태로 표시한다. 매수 판단이 아니라 감시 목적이다.
-    movers = movers.map((m) => ({ ...m, status: "추격 금지 · 관찰" }));
+    const movers = [...domestic, ...overseas]; // kept for AI prompt + backward compat
+
+    const now = new Date();
+    const kstNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+    const domesticAsOf = `${kstNow.getFullYear()}.${kstNow.getMonth() + 1}.${kstNow.getDate()} (KST, 국내 거래일 기준)`;
+    const usSample = overseas.find((m) => m.regularMarketTime);
+    const usAsOf = usSample
+      ? new Date(usSample.regularMarketTime).toLocaleString("ko-KR", { timeZone: "America/New_York" }) + " (미국 동부시간 기준)"
+      : "미국 최근 거래 세션 기준 (현지 시간 정보 없음)";
 
     let summary = "";
     const apiKey = Netlify.env.get("GEMINI_API_KEY");
@@ -131,13 +147,14 @@ export default async (req: Request, context: Context) => {
           .map((m) => `${m.name}(${m.market}, ${m.code}): 현재가 ${m.price}, 등락률 ${m.changePct > 0 ? "+" : ""}${m.changePct}%${m.volume ? `, 거래량 ${m.volume.toLocaleString()}` : ""}`)
           .join("\n");
 
-        const prompt = `다음은 오늘 국내 증시(코스피·코스닥)에서 등락률 상위에 오른 종목 리스트다:
+        const prompt = `다음은 오늘 기준 등락률 상위 종목 리스트다 (국내 코스피·코스닥은 한국 거래일 기준, 미국 종목은 미국 최근 거래 세션 기준 — 서로 날짜가 다를 수 있음에 유의):
 
 ${table}
 
 이 리스트를 보고 2~4문장으로 한국어 코멘트를 작성해라. 반드시 지켜야 할 규칙:
 - "지금 사라", "추격 매수해도 된다", "세력 확실", "무조건" 같은 표현을 절대 쓰지 않는다.
 - 이 종목들은 이미 단기 급등한 상태이므로 지금 추격 매수하기보다, 조정·눌림 후 지지가 확인되면 재평가하는 것이 원칙이라는 점을 명확히 전달한다.
+- 국내와 미국 리스트를 같이 묶어 "전체 시장이 동일하다"는 식으로 단정하지 말고, 필요하면 국내/미국을 구분해서 언급한다.
 - 리스트 중 특정 한두 종목이 유난히 거래량이 크거나 등락률이 크면 그 사실만 객관적으로 언급해도 되지만, 매수 추천으로 이어지면 안 된다.
 - 마크다운 기호(**, # 등) 쓰지 말고 평문으로 작성해라.`;
 
@@ -163,7 +180,10 @@ ${table}
 
     return new Response(
       JSON.stringify({
-        movers,
+        domestic,
+        overseas,
+        domesticAsOf,
+        usAsOf,
         summary,
         errors: errors.length ? errors : undefined,
         generatedAt: new Date().toISOString(),

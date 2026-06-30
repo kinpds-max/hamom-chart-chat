@@ -76,6 +76,11 @@
   }
   .price-cell, .vol-cell{font-family:'JetBrains Mono',monospace; text-align:right;}
 
+  .section-head{display:flex; align-items:baseline; justify-content:space-between; margin:24px 0 10px;}
+  .section-head:first-of-type{margin-top:0;}
+  .section-head h3{font-size:15.5px; font-weight:900;}
+  .section-asof{font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted);}
+
   .skel-row td{padding:12px;}
   .skel{background:linear-gradient(90deg,var(--surface-2) 25%,#F8F9FB 37%,var(--surface-2) 63%); background-size:400% 100%; animation:shimmer 1.4s ease infinite; border-radius:5px; height:14px;}
   @keyframes shimmer{0%{background-position:100% 0;} 100%{background-position:0 0;}}
@@ -119,6 +124,7 @@
 
   <div id="errBox"></div>
 
+  <div class="section-head"><h3>국내 — 코스피 · 코스닥</h3><span class="section-asof" id="domesticAsOf">-</span></div>
   <table>
     <thead>
       <tr>
@@ -129,7 +135,21 @@
         <th>상태</th>
       </tr>
     </thead>
-    <tbody id="tbody"></tbody>
+    <tbody id="domesticBody"></tbody>
+  </table>
+
+  <div class="section-head"><h3>해외 — 미국</h3><span class="section-asof" id="usAsOf">-</span></div>
+  <table>
+    <thead>
+      <tr>
+        <th>종목</th>
+        <th style="text-align:right">현재가(USD)</th>
+        <th style="text-align:right">등락률</th>
+        <th style="text-align:right">거래량</th>
+        <th>상태</th>
+      </tr>
+    </thead>
+    <tbody id="overseasBody"></tbody>
   </table>
 
   <div class="disclaimer">
@@ -139,15 +159,18 @@
 </div>
 
 <script>
-const tbody = document.getElementById('tbody');
+const domesticBody = document.getElementById('domesticBody');
+const overseasBody = document.getElementById('overseasBody');
+const domesticAsOf = document.getElementById('domesticAsOf');
+const usAsOf = document.getElementById('usAsOf');
 const updatedAt = document.getElementById('updatedAt');
 const summaryBox = document.getElementById('summaryBox');
 const refreshBtn = document.getElementById('refreshBtn');
 const errBox = document.getElementById('errBox');
 const AUTO_REFRESH_MS = 60000;
 
-function skeletonRows(){
-  tbody.innerHTML = Array.from({length:8}).map(() => `
+function skeletonRows(tbody){
+  tbody.innerHTML = Array.from({length:6}).map(() => `
     <tr class="skel-row">
       <td><div class="skel" style="width:90px;"></div></td>
       <td><div class="skel" style="width:60px;margin-left:auto;"></div></td>
@@ -158,12 +181,12 @@ function skeletonRows(){
   `).join('');
 }
 
-function renderRows(movers){
-  if(!movers || movers.length === 0){
+function renderRows(tbody, list, priceLocale){
+  if(!list || list.length === 0){
     tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted); padding:20px; text-align:center;">데이터가 없습니다.</td></tr>`;
     return;
   }
-  tbody.innerHTML = movers.map(m => {
+  tbody.innerHTML = list.map(m => {
     const dir = (m.changePct ?? 0) >= 0 ? 'up' : 'down';
     const sign = (m.changePct ?? 0) >= 0 ? '+' : '';
     return `
@@ -172,9 +195,9 @@ function renderRows(movers){
           <div class="name-cell">${m.name}</div>
           <div class="market-tag">${m.market} · ${m.code}</div>
         </td>
-        <td class="price-cell">${m.price != null ? m.price.toLocaleString('ko-KR') : '-'}</td>
+        <td class="price-cell">${m.price != null ? m.price.toLocaleString(priceLocale) : '-'}</td>
         <td style="text-align:right"><span class="pct ${dir}">${sign}${m.changePct ?? '-'}%</span></td>
-        <td class="vol-cell">${m.volume != null ? m.volume.toLocaleString('ko-KR') : '-'}</td>
+        <td class="vol-cell">${m.volume != null ? m.volume.toLocaleString(priceLocale) : '-'}</td>
         <td><span class="status-badge">${m.status || '추격 금지 · 관찰'}</span></td>
       </tr>`;
   }).join('');
@@ -184,7 +207,8 @@ async function loadMovers(isAuto){
   if(!isAuto){
     refreshBtn.disabled = true;
     refreshBtn.textContent = '불러오는 중…';
-    skeletonRows();
+    skeletonRows(domesticBody);
+    skeletonRows(overseasBody);
   }
   updatedAt.innerHTML = '<span class="live-dot"></span>불러오는 중…';
   errBox.innerHTML = '';
@@ -195,7 +219,10 @@ async function loadMovers(isAuto){
     if(!res.ok || !data){
       throw new Error((data && data.error && data.error.message) || ('HTTP ' + res.status));
     }
-    renderRows(data.movers || []);
+    renderRows(domesticBody, data.domestic || [], 'ko-KR');
+    renderRows(overseasBody, data.overseas || [], 'en-US');
+    domesticAsOf.textContent = data.domesticAsOf || '-';
+    usAsOf.textContent = data.usAsOf || '-';
     if(data.errors && data.errors.length){
       errBox.innerHTML = `<div class="err-box">일부 시장 데이터 실패: ${data.errors.join(' / ')}</div>`;
     }
@@ -210,7 +237,8 @@ async function loadMovers(isAuto){
     updatedAt.innerHTML = '<span class="live-dot"></span>실시간 · 마지막 갱신 ' + t.toLocaleTimeString('ko-KR') + ' · 60초마다 자동 갱신';
   } catch(err){
     if(!isAuto){
-      tbody.innerHTML = `<tr><td colspan="5"><div class="err-box">불러오기 실패: ${err.message}</div></td></tr>`;
+      domesticBody.innerHTML = `<tr><td colspan="5"><div class="err-box">불러오기 실패: ${err.message}</div></td></tr>`;
+      overseasBody.innerHTML = '';
     }
     summaryBox.className = 'summary-placeholder';
     summaryBox.textContent = '데이터를 불러오지 못해 코멘트를 생성할 수 없어요.';
