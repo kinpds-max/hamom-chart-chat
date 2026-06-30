@@ -1,4 +1,7 @@
 import type { Context, Config } from "@netlify/functions";
+import { getStore } from "@netlify/blobs";
+
+const AI_CACHE_TTL_MS = 5 * 60 * 1000; // 5분 캐시 — 무료 API 쿼터 보호
 
 const SYMBOLS: { symbol: string; label: string; group: string }[] = [
   { symbol: "^DJI", label: "다우존스", group: "미국" },
@@ -113,19 +116,26 @@ export default async (req: Request, context: Context) => {
     const ok = indices.filter((i: any) => !i.error);
 
     let summary = "";
-    const apiKey = Netlify.env.get("GEMINI_API_KEY");
-    if (apiKey && ok.length > 0) {
-      try {
-        const table = ok
-          .map(
-            (i: any) =>
-              `${i.label}(${i.group}): 현재가 ${i.price}, 전일대비 ${i.changePct > 0 ? "+" : ""}${i.changePct}%, 10일선 ${
-                i.aboveMa10 ? "위" : "아래"
-              }, 추세 ${i.trend}, 거래량 ${i.volumeNote}`
-          )
-          .join("\n");
+    const cacheStore = getStore("ai-cache");
+    const cached: { text: string; ts: number } | null = await cacheStore.get("indices-summary", { type: "json" });
+    const cacheFresh = cached && Date.now() - cached.ts < AI_CACHE_TTL_MS;
 
-        const prompt = `다음은 5대 주가지수의 실시간 데이터다 (다우존스, 나스닥종합, S&P500, 코스피, 코스닥):
+    if (cacheFresh) {
+      summary = cached!.text;
+    } else {
+      const apiKey = Netlify.env.get("GEMINI_API_KEY");
+      if (apiKey && ok.length > 0) {
+        try {
+          const table = ok
+            .map(
+              (i: any) =>
+                `${i.label}(${i.group}): 현재가 ${i.price}, 전일대비 ${i.changePct > 0 ? "+" : ""}${i.changePct}%, 10일선 ${
+                  i.aboveMa10 ? "위" : "아래"
+                }, 추세 ${i.trend}, 거래량 ${i.volumeNote}`
+            )
+            .join("\n");
+
+          const prompt = `다음은 5대 주가지수의 실시간 데이터다 (다우존스, 나스닥종합, S&P500, 코스피, 코스닥):
 
 ${table}
 
@@ -136,23 +146,32 @@ ${table}
 - 국내 투자자가 오늘 참고할 만한 리스크 포인트 1~2가지 (매수/매도 지시 금지, 객관적 해석만)
 마지막 문장에는 "이 판단은 단기 기술적 지표 기준이며 실제 투자 결정 전에는 추가 정보를 확인해야 한다"는 취지를 반드시 넣어라. 마크다운 기호(**, # 등) 쓰지 말고 평문으로 작성해라.`;
 
-        const geminiRes = await fetch(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
-            encodeURIComponent(apiKey),
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text: prompt }] }],
-              generationConfig: { maxOutputTokens: 700 },
-            }),
+          const geminiRes = await fetch(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
+              encodeURIComponent(apiKey),
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{ role: "user", parts: [{ text: prompt }] }],
+                generationConfig: { maxOutputTokens: 700 },
+              }),
+            }
+          );
+          const geminiData = await geminiRes.json();
+          const parts = geminiData?.candidates?.[0]?.content?.parts || [];
+          const fresh = parts.map((p: any) => p.text || "").join("\n").trim();
+          if (fresh) {
+            summary = fresh;
+            await cacheStore.setJSON("indices-summary", { text: fresh, ts: Date.now() });
+          } else if (cached) {
+            summary = cached.text; // 새로 생성 실패 시 직전 캐시라도 사용
           }
-        );
-        const geminiData = await geminiRes.json();
-        const parts = geminiData?.candidates?.[0]?.content?.parts || [];
-        summary = parts.map((p: any) => p.text || "").join("\n").trim();
-      } catch {
-        summary = "";
+        } catch {
+          if (cached) summary = cached.text;
+        }
+      } else if (cached) {
+        summary = cached.text;
       }
     }
 

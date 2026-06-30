@@ -1,4 +1,7 @@
 import type { Context, Config } from "@netlify/functions";
+import { getStore } from "@netlify/blobs";
+
+const AI_CACHE_TTL_MS = 5 * 60 * 1000; // 5분 캐시 — 무료 API 쿼터 보호
 
 const SOURCES = [
   { sosok: "0", market: "코스피", path: "sise_rise" },
@@ -162,15 +165,22 @@ export default async (req: Request, context: Context) => {
       : "미국 최근 거래 세션 기준 (현지 시간 정보 없음)";
 
     let summary = "";
-    const apiKey = Netlify.env.get("GEMINI_API_KEY");
-    if (apiKey && movers.length > 0) {
-      try {
-        const table = movers
-          .slice(0, 12)
-          .map((m) => `${m.name}(${m.market}, ${m.code}): 현재가 ${m.price}, 등락률 ${m.changePct > 0 ? "+" : ""}${m.changePct}%${m.volume ? `, 거래량 ${m.volume.toLocaleString()}` : ""}`)
-          .join("\n");
+    const cacheStore = getStore("ai-cache");
+    const cached: { text: string; ts: number } | null = await cacheStore.get("movers-summary", { type: "json" });
+    const cacheFresh = cached && Date.now() - cached.ts < AI_CACHE_TTL_MS;
 
-        const prompt = `다음은 오늘 기준 신호가 잡힌 종목 리스트다 (국내는 한국 거래일 기준, 미국은 미국 최근 거래 세션 기준). 신호는 세 가지로 분류되어 있다: "급등주발생"(단기 급등, 추격금지), "매수신호"(완만한 상승, 관심 단계), "매도신호"(급락, 손절검토):
+    if (cacheFresh) {
+      summary = cached!.text;
+    } else {
+      const apiKey = Netlify.env.get("GEMINI_API_KEY");
+      if (apiKey && movers.length > 0) {
+        try {
+          const table = movers
+            .slice(0, 12)
+            .map((m) => `${m.name}(${m.market}, ${m.code}): 현재가 ${m.price}, 등락률 ${m.changePct > 0 ? "+" : ""}${m.changePct}%${m.volume ? `, 거래량 ${m.volume.toLocaleString()}` : ""}`)
+            .join("\n");
+
+          const prompt = `다음은 오늘 기준 신호가 잡힌 종목 리스트다 (국내는 한국 거래일 기준, 미국은 미국 최근 거래 세션 기준). 신호는 세 가지로 분류되어 있다: "급등주발생"(단기 급등, 추격금지), "매수신호"(완만한 상승, 관심 단계), "매도신호"(급락, 손절검토):
 
 ${table}
 
@@ -181,23 +191,32 @@ ${table}
 - 국내와 미국 리스트를 같이 묶어 "전체 시장이 동일하다"는 식으로 단정하지 말고, 필요하면 국내/미국을 구분해서 언급한다.
 - 마크다운 기호(**, # 등) 쓰지 말고 평문으로 작성해라.`;
 
-        const geminiRes = await fetch(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
-            encodeURIComponent(apiKey),
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text: prompt }] }],
-              generationConfig: { maxOutputTokens: 500 },
-            }),
+          const geminiRes = await fetch(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
+              encodeURIComponent(apiKey),
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{ role: "user", parts: [{ text: prompt }] }],
+                generationConfig: { maxOutputTokens: 500 },
+              }),
+            }
+          );
+          const geminiData = await geminiRes.json();
+          const parts = geminiData?.candidates?.[0]?.content?.parts || [];
+          const fresh = parts.map((p: any) => p.text || "").join("\n").trim();
+          if (fresh) {
+            summary = fresh;
+            await cacheStore.setJSON("movers-summary", { text: fresh, ts: Date.now() });
+          } else if (cached) {
+            summary = cached.text;
           }
-        );
-        const geminiData = await geminiRes.json();
-        const parts = geminiData?.candidates?.[0]?.content?.parts || [];
-        summary = parts.map((p: any) => p.text || "").join("\n").trim();
-      } catch {
-        summary = "";
+        } catch {
+          if (cached) summary = cached.text;
+        }
+      } else if (cached) {
+        summary = cached.text;
       }
     }
 
