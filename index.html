@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>장대양봉 매매 분석 채팅</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B0E14;
+    --surface:#121723;
+    --surface-2:#19202E;
+    --bubble-user:#1C2333;
+    --line:#262E40;
+    --text:#E9ECF2;
+    --muted:#8B93A7;
+    --up:#E84142;
+    --down:#3B82F6;
+    --gold:#C9A227;
+    --up-dim: rgba(232,65,66,0.12);
+    --gold-dim: rgba(201,162,39,0.14);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg); color:var(--text); font-family:'Noto Sans KR', system-ui, sans-serif;
+    display:flex; flex-direction:column; height:100vh; overflow:hidden;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .mono{font-family:'JetBrains Mono', monospace;}
+
+  /* ---- ticker signature ---- */
+  .ticker{width:100%; height:40px; overflow:hidden; position:relative; flex-shrink:0;
+    border-bottom:1px solid var(--line); background:linear-gradient(180deg,#0D1119,#0B0E14);}
+  .ticker-track{display:flex; align-items:flex-end; gap:5px; height:100%; padding:7px 0;
+    width:max-content; animation: scroll-left 30s linear infinite;}
+  .candle{width:4px; border-radius:1px; opacity:0.8;}
+  .candle.up{background:var(--up);}
+  .candle.down{background:var(--down);}
+  @keyframes scroll-left{from{transform:translateX(0);} to{transform:translateX(-50%);}}
+  @media (prefers-reduced-motion: reduce){.ticker-track{animation:none;}}
+
+  header{
+    flex-shrink:0; padding:16px 20px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+  }
+  .htitle{display:flex; flex-direction:column; gap:3px;}
+  .htitle .eyebrow{font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:.12em; color:var(--gold); text-transform:uppercase;}
+  .htitle h1{font-size:17px; font-weight:900;}
+  .clear-btn{
+    font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted);
+    background:transparent; border:1px solid var(--line); border-radius:6px; padding:7px 12px;
+    cursor:pointer; transition:.15s;
+  }
+  .clear-btn:hover{color:var(--text); border-color:var(--muted);}
+
+  /* ---- message list ---- */
+  #chatLog{flex:1; overflow-y:auto; padding:22px 16px 12px;}
+  .log-inner{max-width:680px; margin:0 auto; display:flex; flex-direction:column; gap:16px;}
+
+  .empty-state{
+    text-align:center; color:var(--muted); font-size:13.5px; padding:60px 20px; line-height:1.8;
+  }
+  .empty-state b{color:var(--text); display:block; font-size:15px; margin-bottom:8px;}
+
+  .msg{display:flex; gap:10px; max-width:88%;}
+  .msg.user{align-self:flex-end; flex-direction:row-reverse;}
+  .msg.assistant{align-self:flex-start;}
+  .avatar{
+    width:28px; height:28px; border-radius:6px; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; font-size:13px; font-family:'JetBrains Mono',monospace; font-weight:700;
+    margin-top:2px;
+  }
+  .msg.user .avatar{background:var(--surface-2); color:var(--muted); border:1px solid var(--line);}
+  .msg.assistant .avatar{background:var(--up-dim); color:var(--up); border:1px solid var(--up);}
+
+  .bubble{
+    border-radius:10px; padding:12px 14px; font-size:14.5px; line-height:1.7;
+    position:relative;
+  }
+  .msg.user .bubble{background:var(--bubble-user); border:1px solid var(--line); border-top-right-radius:3px;}
+  .msg.assistant .bubble{background:var(--surface); border:1px solid var(--line); border-top-left-radius:3px;}
+
+  .bubble img.chat-img{
+    display:block; max-width:240px; border-radius:7px; margin-bottom:8px; border:1px solid var(--line);
+  }
+  .bubble-text{white-space:pre-wrap; word-break:break-word;}
+  .msg-h{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--gold); letter-spacing:.04em;
+    margin:10px 0 4px; text-transform:uppercase;}
+  .msg-h:first-child{margin-top:0;}
+  .msg-li{padding-left:14px; position:relative; margin:2px 0;}
+  .msg-li::before{content:"·"; position:absolute; left:2px; color:var(--muted);}
+
+  .copy-btn{
+    margin-top:9px; display:inline-flex; align-items:center; gap:5px;
+    font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted);
+    background:transparent; border:1px solid var(--line); border-radius:5px; padding:4px 9px;
+    cursor:pointer; transition:.15s;
+  }
+  .copy-btn:hover{color:var(--text); border-color:var(--muted);}
+  .copy-btn.copied{color:var(--up); border-color:var(--up);}
+
+  .typing{display:flex; gap:4px; align-items:center; padding:4px 2px;}
+  .typing span{width:5px; height:5px; border-radius:50%; background:var(--muted); animation:tb 1.2s infinite;}
+  .typing span:nth-child(2){animation-delay:.15s;}
+  .typing span:nth-child(3){animation-delay:.3s;}
+  @keyframes tb{0%,60%,100%{opacity:.3; transform:translateY(0);} 30%{opacity:1; transform:translateY(-3px);}}
+
+  .err-bubble{border-color:var(--down) !important; background:rgba(59,130,246,0.1) !important; color:#cfe0ff;}
+
+  /* ---- input bar ---- */
+  .inputbar{flex-shrink:0; border-top:1px solid var(--line); background:var(--bg); padding:14px 16px 18px;}
+  .inputbar-inner{max-width:680px; margin:0 auto;}
+
+  .attach-preview{
+    display:none; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; margin-bottom:9px;
+  }
+  .attach-preview.show{display:flex;}
+  .attach-preview img{width:40px; height:40px; object-fit:cover; border-radius:5px; flex-shrink:0;}
+  .attach-preview .ap-name{flex:1; font-size:12.5px; color:var(--muted); font-family:'JetBrains Mono',monospace;}
+  .attach-remove{
+    background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:16px; line-height:1;
+    padding:4px;
+  }
+  .attach-remove:hover{color:var(--down);}
+
+  .input-row{display:flex; align-items:flex-end; gap:8px;
+    background:var(--surface); border:1px solid var(--line); border-radius:11px; padding:8px 8px 8px 14px;}
+  .input-row:focus-within{border-color:var(--gold);}
+  textarea{
+    flex:1; background:transparent; border:none; outline:none; resize:none;
+    color:var(--text); font-family:'Noto Sans KR', sans-serif; font-size:14.5px; line-height:1.55;
+    max-height:140px; padding:7px 0;
+  }
+  textarea::placeholder{color:var(--muted);}
+
+  .icon-btn{
+    width:36px; height:36px; border-radius:8px; border:1px solid var(--line); background:transparent;
+    color:var(--muted); cursor:pointer; display:flex; align-items:center; justify-content:center;
+    font-size:16px; flex-shrink:0; transition:.15s;
+  }
+  .icon-btn:hover{color:var(--text); border-color:var(--muted);}
+  .send-btn{background:var(--up); border-color:var(--up); color:#fff;}
+  .send-btn:hover{background:#d83638; color:#fff;}
+  .send-btn:disabled{background:#3a2526; border-color:#3a2526; color:#8a6e6e; cursor:not-allowed;}
+
+  .hint{font-size:11.5px; color:var(--muted); margin-top:8px; font-family:'JetBrains Mono',monospace; text-align:center;}
+  input[type=file]{display:none;}
+
+  @media (max-width:480px){
+    .msg{max-width:94%;}
+    header h1{font-size:15.5px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="ticker" aria-hidden="true"><div class="ticker-track" id="tickerTrack"></div></div>
+
+<header>
+  <div class="htitle">
+    <span class="eyebrow">STOCK TALK // 장대양봉 전문</span>
+    <h1>장대양봉 매매 분석 채팅</h1>
+  </div>
+  <button class="clear-btn" id="clearBtn">대화 초기화</button>
+</header>
+
+<div id="chatLog">
+  <div class="log-inner" id="logInner">
+    <div class="empty-state" id="emptyState">
+      <b>차트를 붙여넣거나 질문을 입력해보세요</b>
+      차트 캡처 후 Ctrl+V(붙여넣기)로 바로 올릴 수 있어요.<br>
+      바닥권 위치 · 거래량 · 눌림목 · 손절선 기준으로 답변합니다.
+    </div>
+  </div>
+</div>
+
+<div class="inputbar">
+  <div class="inputbar-inner">
+    <div class="attach-preview" id="attachPreview">
+      <img id="attachThumb" alt="첨부 이미지 미리보기">
+      <span class="ap-name" id="attachName">이미지 첨부됨</span>
+      <button class="attach-remove" id="attachRemove" aria-label="첨부 제거">✕</button>
+    </div>
+    <div class="input-row">
+      <button class="icon-btn" id="clipBtn" aria-label="이미지 첨부" title="이미지 첨부">📎</button>
+      <textarea id="msgInput" rows="1" placeholder="메시지를 입력하거나 차트 이미지를 붙여넣으세요 (Ctrl+V)"></textarea>
+      <button class="icon-btn send-btn" id="sendBtn" aria-label="전송" title="전송">➤</button>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+    <div class="hint">Ctrl+V로 이미지 붙여넣기 · 답변 하단 '복사' 버튼으로 텍스트 복사 가능</div>
+  </div>
+</div>
+
+<script>
+// ---- ticker decoration ----
+(function(){
+  const track = document.getElementById('tickerTrack');
+  let html = '';
+  for(let i=0;i<70;i++){
+    const up = Math.random() > 0.45;
+    const h = 6 + Math.floor(Math.random()*26);
+    html += `<div class="candle ${up?'up':'down'}" style="height:${h}px"></div>`;
+  }
+  track.innerHTML = html + html;
+})();
+
+// 시스템 프롬프트는 서버리스 함수(netlify/functions/chat.mts)에서 관리합니다.
+
+// ---- state ----
+let history = []; // {role, displayText, imageDataUrl, apiContent}
+let pendingImage = null; // {dataUrl, base64, mediaType, name}
+
+const chatLog = document.getElementById('chatLog');
+const logInner = document.getElementById('logInner');
+const emptyState = document.getElementById('emptyState');
+const msgInput = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
+const clipBtn = document.getElementById('clipBtn');
+const fileInput = document.getElementById('fileInput');
+const attachPreview = document.getElementById('attachPreview');
+const attachThumb = document.getElementById('attachThumb');
+const attachName = document.getElementById('attachName');
+const attachRemove = document.getElementById('attachRemove');
+const clearBtn = document.getElementById('clearBtn');
+
+function escapeHTML(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function autoGrow(){
+  msgInput.style.height = 'auto';
+  msgInput.style.height = Math.min(msgInput.scrollHeight, 140) + 'px';
+}
+msgInput.addEventListener('input', autoGrow);
+
+function formatAssistantText(text){
+  const cleaned = text.replace(/\*\*/g, '');
+  const lines = cleaned.split('\n');
+  return lines.map(raw => {
+    const line = raw.trim();
+    if(!line) return '';
+    const h = line.match(/^■\s*(.+)$/);
+    if(h) return `<div class="msg-h">${escapeHTML(h[1])}</div>`;
+    if(line.startsWith('- ')) return `<div class="msg-li">${escapeHTML(line.slice(2))}</div>`;
+    return `<div>${escapeHTML(line)}</div>`;
+  }).join('');
+}
+
+function addMessage(role, text, imageDataUrl, isError){
+  emptyState.style.display = 'none';
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + role;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = role === 'user' ? '나' : 'AI';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble' + (isError ? ' err-bubble' : '');
+
+  if(imageDataUrl){
+    const img = document.createElement('img');
+    img.className = 'chat-img';
+    img.src = imageDataUrl;
+    img.alt = '첨부된 차트 이미지';
+    bubble.appendChild(img);
+  }
+
+  const textDiv = document.createElement('div');
+  if(role === 'assistant' && !isError){
+    textDiv.innerHTML = formatAssistantText(text);
+  } else {
+    textDiv.className = 'bubble-text';
+    textDiv.textContent = text;
+  }
+  bubble.appendChild(textDiv);
+
+  if(role === 'assistant' && !isError){
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'copy-btn';
+    copyBtn.innerHTML = '⧉ 복사';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.classList.add('copied');
+        copyBtn.innerHTML = '✓ 복사됨';
+        setTimeout(() => {
+          copyBtn.classList.remove('copied');
+          copyBtn.innerHTML = '⧉ 복사';
+        }, 1600);
+      });
+    });
+    bubble.appendChild(copyBtn);
+  }
+
+  wrap.appendChild(avatar);
+  wrap.appendChild(bubble);
+  logInner.appendChild(wrap);
+  chatLog.scrollTop = chatLog.scrollHeight;
+  return wrap;
+}
+
+function addTypingIndicator(){
+  const wrap = document.createElement('div');
+  wrap.className = 'msg assistant';
+  wrap.id = 'typingIndicator';
+  wrap.innerHTML = `<div class="avatar">AI</div>
+    <div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  logInner.appendChild(wrap);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+function removeTypingIndicator(){
+  const el = document.getElementById('typingIndicator');
+  if(el) el.remove();
+}
+
+// ---- attach handling ----
+function setPendingImage(file){
+  if(!file || !file.type.startsWith('image/')) return;
+  if(file.size > 15 * 1024 * 1024){
+    alert('이미지가 너무 큽니다. 15MB 이하로 첨부해주세요.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    pendingImage = {
+      dataUrl,
+      base64: dataUrl.split(',')[1],
+      mediaType: file.type,
+      name: file.name || '붙여넣은 이미지'
+    };
+    attachThumb.src = dataUrl;
+    attachName.textContent = pendingImage.name;
+    attachPreview.classList.add('show');
+  };
+  reader.readAsDataURL(file);
+}
+
+clipBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => {
+  if(e.target.files && e.target.files[0]) setPendingImage(e.target.files[0]);
+  fileInput.value = '';
+});
+attachRemove.addEventListener('click', () => {
+  pendingImage = null;
+  attachPreview.classList.remove('show');
+});
+
+// paste image directly into textarea
+msgInput.addEventListener('paste', (e) => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if(!items) return;
+  for(const item of items){
+    if(item.type && item.type.startsWith('image/')){
+      const file = item.getAsFile();
+      if(file){
+        e.preventDefault();
+        setPendingImage(file);
+      }
+      return;
+    }
+  }
+  // otherwise: let default text paste behavior happen
+});
+
+// also allow drop onto chat log
+chatLog.addEventListener('dragover', (e) => e.preventDefault());
+chatLog.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(file) setPendingImage(file);
+});
+
+// ---- send message ----
+msgInput.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter' && !e.shiftKey){
+    e.preventDefault();
+    sendMessage();
+  }
+});
+sendBtn.addEventListener('click', sendMessage);
+
+async function sendMessage(){
+  const text = msgInput.value.trim();
+  if(!text && !pendingImage) return;
+
+  const apiContent = [];
+  let imageForDisplay = null;
+  if(pendingImage){
+    apiContent.push({ type:'image', source:{ type:'base64', media_type: pendingImage.mediaType, data: pendingImage.base64 } });
+    imageForDisplay = pendingImage.dataUrl;
+  }
+  apiContent.push({ type:'text', text: text || '이 차트를 분석해줘.' });
+
+  history.push({ role:'user', apiContent });
+  addMessage('user', text || '(이미지 첨부)', imageForDisplay);
+
+  msgInput.value = '';
+  autoGrow();
+  pendingImage = null;
+  attachPreview.classList.remove('show');
+  sendBtn.disabled = true;
+  addTypingIndicator();
+
+  try{
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: history.map(m => ({ role: m.role, content: m.apiContent }))
+      })
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if(!response.ok){
+      const detail = data && data.error && data.error.message ? data.error.message : ('HTTP ' + response.status);
+      console.error('API error response:', data);
+      throw new Error(detail);
+    }
+    if(!data){
+      throw new Error('응답을 해석할 수 없습니다 (JSON parse 실패).');
+    }
+
+    const textBlocks = (data.content || []).filter(b => b.type === 'text').map(b => b.text);
+    const fullText = textBlocks.join('\n').trim();
+    if(!fullText){
+      console.error('Empty content in response:', data);
+      throw new Error('빈 응답을 받았습니다.');
+    }
+
+    history.push({ role:'assistant', apiContent: [{ type:'text', text: fullText }] });
+    removeTypingIndicator();
+    addMessage('assistant', fullText);
+  } catch(err){
+    console.error('Chat request failed:', err);
+    removeTypingIndicator();
+    history.pop(); // remove the user turn so retry stays consistent context-wise
+    addMessage('assistant', '응답을 받는 중 문제가 발생했어요.\n원인: ' + err.message + '\n잠시 후 다시 시도해주세요.', null, true);
+  } finally {
+    sendBtn.disabled = false;
+    msgInput.focus();
+  }
+}
+
+clearBtn.addEventListener('click', () => {
+  if(history.length === 0) return;
+  if(!confirm('대화 내용을 모두 지울까요?')) return;
+  history = [];
+  logInner.innerHTML = '';
+  logInner.appendChild(emptyState);
+  emptyState.style.display = 'block';
+});
+</script>
+</body>
+</html>
