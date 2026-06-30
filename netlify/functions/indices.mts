@@ -82,6 +82,7 @@ async function fetchIndex(symbol: string) {
     volumeNote,
     currency: meta?.currency || "",
     asOf: timestamps.length ? new Date(timestamps[timestamps.length - 1] * 1000).toISOString() : null,
+    series: rows.slice(-60).map((r) => ({ t: r.t * 1000, c: Math.round(r.close * 100) / 100 })),
   };
 }
 
