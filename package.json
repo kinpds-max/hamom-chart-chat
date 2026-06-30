@@ -1,0 +1,8 @@
+{
+  "name": "hamom-chart-chat",
+  "private": true,
+  "dependencies": {
+    "@netlify/functions": "^2.8.1",
+    "@netlify/blobs": "^8.1.0"
+  }
+}
